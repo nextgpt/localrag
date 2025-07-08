@@ -86,6 +86,7 @@ class ErrorResponse(BaseResponse):
     """错误响应模型"""
     success: bool = False
     error: ErrorDetail
+    data: Optional[Any] = None  # 添加可选的data字段以兼容SuccessResponse
 
 
 class PaginationInfo(BaseModel):

@@ -638,6 +638,50 @@ class CacheService:
             logger.error(f"Redis add_to_queue 操作失败: {queue_name} - {e}")
             return False
 
+    # ===================
+    # 数据操作便利方法 - 用于知识库管理
+    # ===================
+    
+    async def save_data(self, key: str, data: Any, expire: Optional[int] = None) -> bool:
+        """保存数据（支持字典、列表等复杂类型）"""
+        try:
+            if isinstance(data, (dict, list)):
+                serialized_data = json.dumps(data, ensure_ascii=False)
+            else:
+                serialized_data = str(data)
+            
+            return await self.set(key, serialized_data, expire)
+        except Exception as e:
+            logger.error(f"保存数据失败: {key} - {e}")
+            return False
+    
+    async def get_data(self, key: str) -> Optional[Any]:
+        """获取数据（自动反序列化JSON）"""
+        try:
+            value = await self.get(key)
+            if value is None:
+                return None
+            
+            # 尝试解析为JSON
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                # 如果不是JSON，返回原始字符串
+                return value
+                
+        except Exception as e:
+            logger.error(f"获取数据失败: {key} - {e}")
+            return None
+    
+    async def delete_data(self, key: str) -> bool:
+        """删除数据"""
+        try:
+            result = await self.delete(key)
+            return result > 0
+        except Exception as e:
+            logger.error(f"删除数据失败: {key} - {e}")
+            return False
+
 
 # 全局缓存服务实例
 cache_service = CacheService()
