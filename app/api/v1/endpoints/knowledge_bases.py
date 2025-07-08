@@ -12,7 +12,7 @@ from app.models.knowledge_base import (
     KnowledgeBaseSearch, KnowledgeBaseStatus, KnowledgeBaseStats
 )
 from app.models.responses import (
-    ResponseModel, ErrorCode, create_error_response, create_success_response
+    SuccessResponse, ErrorResponse, ErrorCode, ErrorDetail
 )
 from app.services.knowledge_base_service import get_knowledge_base_service
 from app.services.document_service import get_document_service
@@ -23,7 +23,7 @@ logger = logging.getLogger("rag-anything")
 router = APIRouter()
 
 
-@router.post("/", response_model=ResponseModel[KnowledgeBase])
+@router.post("/", response_model=SuccessResponse)
 async def create_knowledge_base(
     request: KnowledgeBaseCreate
 ):
@@ -36,20 +36,22 @@ async def create_knowledge_base(
         service = await get_knowledge_base_service()
         knowledge_base = await service.create_knowledge_base(request)
         
-        return create_success_response(
+        return SuccessResponse(
             data=knowledge_base,
             message=f"知识库创建成功: {knowledge_base.name}"
         )
         
     except Exception as e:
         logger.error(f"创建知识库失败: {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"创建知识库失败: {str(e)}"
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"创建知识库失败: {str(e)}"
+            )
         )
 
 
-@router.get("/", response_model=ResponseModel[List[KnowledgeBase]])
+@router.get("/", response_model=SuccessResponse)
 async def list_knowledge_bases(
     limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
@@ -68,20 +70,22 @@ async def list_knowledge_bases(
             status_filter=status
         )
         
-        return create_success_response(
+        return SuccessResponse(
             data=knowledge_bases,
             message=f"获取到 {len(knowledge_bases)} 个知识库，共 {total} 个"
         )
         
     except Exception as e:
         logger.error(f"列出知识库失败: {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"列出知识库失败: {str(e)}"
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"列出知识库失败: {str(e)}"
+            )
         )
 
 
-@router.get("/{kb_id}", response_model=ResponseModel[KnowledgeBase])
+@router.get("/{kb_id}", response_model=SuccessResponse)
 async def get_knowledge_base(
     kb_id: str = Path(..., description="知识库ID")
 ):
@@ -93,25 +97,29 @@ async def get_knowledge_base(
         knowledge_base = await service.get_knowledge_base(kb_id)
         
         if not knowledge_base:
-            return create_error_response(
-                ErrorCode.NOT_FOUND,
-                f"知识库不存在: {kb_id}"
+            return ErrorResponse(
+                error=ErrorDetail(
+                    code=ErrorCode.NOT_FOUND,
+                    message=f"知识库不存在: {kb_id}"
+                )
             )
         
-        return create_success_response(
+        return SuccessResponse(
             data=knowledge_base,
             message="获取知识库信息成功"
         )
         
     except Exception as e:
         logger.error(f"获取知识库失败: {kb_id} - {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"获取知识库失败: {str(e)}"
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"获取知识库失败: {str(e)}"
+            )
         )
 
 
-@router.put("/{kb_id}", response_model=ResponseModel[KnowledgeBase])
+@router.put("/{kb_id}", response_model=SuccessResponse)
 async def update_knowledge_base(
     kb_id: str = Path(..., description="知识库ID"),
     request: KnowledgeBaseUpdate = Body(...)
@@ -126,21 +134,25 @@ async def update_knowledge_base(
         knowledge_base = await service.update_knowledge_base(kb_id, request)
         
         if not knowledge_base:
-            return create_error_response(
-                ErrorCode.NOT_FOUND,
-                f"知识库不存在: {kb_id}"
+            return ErrorResponse(
+                error=ErrorDetail(
+                    code=ErrorCode.NOT_FOUND,
+                    message=f"知识库不存在: {kb_id}"
+                )
             )
         
-        return create_success_response(
+        return SuccessResponse(
             data=knowledge_base,
             message="知识库更新成功"
         )
         
     except Exception as e:
         logger.error(f"更新知识库失败: {kb_id} - {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"更新知识库失败: {str(e)}"
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"更新知识库失败: {str(e)}"
+            )
         )
 
 
@@ -159,21 +171,25 @@ async def delete_knowledge_base(
         success = await service.delete_knowledge_base(kb_id, delete_files)
         
         if not success:
-            return create_error_response(
-                ErrorCode.NOT_FOUND,
-                f"知识库不存在: {kb_id}"
+            return ErrorResponse(
+                error=ErrorDetail(
+                    code=ErrorCode.NOT_FOUND,
+                    message=f"知识库不存在: {kb_id}"
+                )
             )
         
-        return create_success_response(
+        return SuccessResponse(
             data={"deleted": True, "files_deleted": delete_files},
             message="知识库删除成功"
         )
         
     except Exception as e:
         logger.error(f"删除知识库失败: {kb_id} - {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"删除知识库失败: {str(e)}"
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"删除知识库失败: {str(e)}"
+            )
         )
 
 
@@ -192,21 +208,25 @@ async def add_file_to_knowledge_base(
         success = await service.add_file_to_knowledge_base(kb_id, file_id)
         
         if not success:
-            return create_error_response(
-                ErrorCode.INVALID_REQUEST,
-                "添加文件到知识库失败，请检查知识库和文件是否存在"
+            return ErrorResponse(
+                error=ErrorDetail(
+                    code=ErrorCode.INVALID_REQUEST,
+                    message="添加文件到知识库失败，请检查知识库和文件是否存在"
+                )
             )
         
-        return create_success_response(
+        return SuccessResponse(
             data={"kb_id": kb_id, "file_id": file_id},
             message="文件添加到知识库成功"
         )
         
     except Exception as e:
         logger.error(f"添加文件到知识库失败: {kb_id}/{file_id} - {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"添加文件失败: {str(e)}"
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"添加文件失败: {str(e)}"
+            )
         )
 
 
@@ -225,21 +245,25 @@ async def remove_file_from_knowledge_base(
         success = await service.remove_file_from_knowledge_base(kb_id, file_id)
         
         if not success:
-            return create_error_response(
-                ErrorCode.NOT_FOUND,
-                "移除文件失败，请检查知识库和文件关联"
+            return ErrorResponse(
+                error=ErrorDetail(
+                    code=ErrorCode.NOT_FOUND,
+                    message="移除文件失败，请检查知识库和文件关联"
+                )
             )
         
-        return create_success_response(
+        return SuccessResponse(
             data={"kb_id": kb_id, "file_id": file_id},
             message="文件从知识库移除成功"
         )
         
     except Exception as e:
         logger.error(f"移除文件失败: {kb_id}/{file_id} - {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"移除文件失败: {str(e)}"
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"移除文件失败: {str(e)}"
+            )
         )
 
 
@@ -262,48 +286,52 @@ async def get_knowledge_base_files(
             if file_info:
                 files.append(file_info)
         
-        return create_success_response(
+        return SuccessResponse(
             data=files,
             message=f"知识库包含 {len(files)} 个文件"
         )
         
     except Exception as e:
         logger.error(f"获取知识库文件失败: {kb_id} - {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"获取知识库文件失败: {str(e)}"
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"获取知识库文件失败: {str(e)}"
+            )
         )
 
 
-@router.get("/{kb_id}/stats", response_model=ResponseModel[KnowledgeBaseStats])
+@router.get("/{kb_id}/stats", response_model=SuccessResponse)
 async def get_knowledge_base_stats(
     kb_id: str = Path(..., description="知识库ID")
 ):
     """
     获取知识库统计信息
-    
-    包括文件数量、向量数量、处理状态分布等
     """
     try:
         service = await get_knowledge_base_service()
         stats = await service.get_knowledge_base_stats(kb_id)
         
         if not stats:
-            return create_error_response(
-                ErrorCode.NOT_FOUND,
-                f"知识库不存在: {kb_id}"
+            return ErrorResponse(
+                error=ErrorDetail(
+                    code=ErrorCode.NOT_FOUND,
+                    message=f"知识库不存在: {kb_id}"
+                )
             )
         
-        return create_success_response(
+        return SuccessResponse(
             data=stats,
-            message="获取知识库统计成功"
+            message="获取知识库统计信息成功"
         )
         
     except Exception as e:
         logger.error(f"获取知识库统计失败: {kb_id} - {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"获取知识库统计失败: {str(e)}"
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"获取知识库统计失败: {str(e)}"
+            )
         )
 
 
@@ -313,60 +341,52 @@ async def search_knowledge_base(
     request: KnowledgeBaseSearch = Body(...)
 ):
     """
-    在知识库中进行语义检索
+    在知识库中搜索
     
-    支持文本和图片结果，可配置检索参数
+    支持返回文本和图片结果
     """
     try:
-        # 验证知识库存在
-        kb_service = await get_knowledge_base_service()
-        knowledge_base = await kb_service.get_knowledge_base(kb_id)
+        service = await get_knowledge_base_service()
         
-        if not knowledge_base:
-            return create_error_response(
-                ErrorCode.NOT_FOUND,
-                f"知识库不存在: {kb_id}"
+        # 验证知识库是否存在
+        kb = await service.get_knowledge_base(kb_id)
+        if not kb:
+            return ErrorResponse(
+                error=ErrorDetail(
+                    code=ErrorCode.NOT_FOUND,
+                    message=f"知识库不存在: {kb_id}"
+                )
             )
         
-        # 使用知识库配置的检索参数（可被请求参数覆盖）
-        top_k = request.top_k or knowledge_base.qdrant_config.top_k
-        score_threshold = request.score_threshold or knowledge_base.qdrant_config.score_threshold
-        
-        # 执行检索
+        # 执行搜索
         search_service = SearchService()
-        
-        # 基于知识库的专用检索
-        results = await search_service.search_in_knowledge_base(
+        results = await search_service.search_knowledge_base(
             kb_id=kb_id,
-            collection_name=knowledge_base.qdrant_config.collection_name,
             query=request.query,
-            top_k=top_k,
-            score_threshold=score_threshold,
-            return_images=request.return_images,
-            return_metadata=request.return_metadata,
-            file_types=request.file_types,
-            date_range=request.date_range
+            search_type=request.search_type,
+            top_k=request.top_k,
+            score_threshold=request.score_threshold,
+            include_images=request.include_images
         )
         
-        return create_success_response(
+        return SuccessResponse(
             data={
-                "kb_id": kb_id,
                 "query": request.query,
                 "results": results,
-                "search_params": {
-                    "top_k": top_k,
-                    "score_threshold": score_threshold,
-                    "return_images": request.return_images
-                }
+                "total_results": len(results),
+                "search_type": request.search_type,
+                "knowledge_base": kb_id
             },
-            message=f"检索完成，找到 {len(results)} 个相关结果"
+            message=f"搜索完成，找到 {len(results)} 个结果"
         )
         
     except Exception as e:
-        logger.error(f"知识库检索失败: {kb_id} - {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"知识库检索失败: {str(e)}"
+        logger.error(f"知识库搜索失败: {kb_id} - {e}")
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"搜索失败: {str(e)}"
+            )
         )
 
 
@@ -376,47 +396,43 @@ async def vectorize_knowledge_base(
     priority: int = Query(0, description="处理优先级")
 ):
     """
-    对知识库中的所有文件进行向量化
+    批量向量化知识库中的文件
     
-    批量处理知识库中已解析的文件
+    对知识库中所有已解析的文件进行向量化处理
     """
     try:
-        kb_service = await get_knowledge_base_service()
-        doc_service = await get_document_service()
+        service = await get_knowledge_base_service()
         
-        # 获取知识库文件列表
-        file_ids = await kb_service.get_knowledge_base_files(kb_id)
-        
-        if not file_ids:
-            return create_error_response(
-                ErrorCode.INVALID_REQUEST,
-                "知识库中没有文件需要向量化"
+        # 验证知识库是否存在
+        kb = await service.get_knowledge_base(kb_id)
+        if not kb:
+            return ErrorResponse(
+                error=ErrorDetail(
+                    code=ErrorCode.NOT_FOUND,
+                    message=f"知识库不存在: {kb_id}"
+                )
             )
         
-        # 启动向量化任务
-        task_ids = []
-        for file_id in file_ids:
-            try:
-                task_id = await doc_service.start_vectorize_task(file_id, priority)
-                task_ids.append(task_id)
-            except Exception as e:
-                logger.warning(f"文件 {file_id} 向量化任务启动失败: {e}")
+        # 启动批量向量化
+        task_ids = await service.vectorize_knowledge_base(kb_id, priority)
         
-        return create_success_response(
+        return SuccessResponse(
             data={
-                "kb_id": kb_id,
+                "knowledge_base_id": kb_id,
                 "task_ids": task_ids,
-                "total_files": len(file_ids),
-                "started_tasks": len(task_ids)
+                "total_tasks": len(task_ids),
+                "priority": priority
             },
-            message=f"启动向量化任务：{len(task_ids)}/{len(file_ids)} 个文件"
+            message=f"已启动 {len(task_ids)} 个向量化任务"
         )
         
     except Exception as e:
         logger.error(f"知识库向量化失败: {kb_id} - {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"知识库向量化失败: {str(e)}"
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"向量化失败: {str(e)}"
+            )
         )
 
 
@@ -428,32 +444,39 @@ async def reindex_knowledge_base(
     """
     重建知识库索引
     
-    可配置HNSW等专业参数优化检索性能
+    删除现有向量数据，重新向量化所有文件
+    支持HNSW参数优化
     """
     try:
-        kb_service = await get_knowledge_base_service()
-        knowledge_base = await kb_service.get_knowledge_base(kb_id)
+        service = await get_knowledge_base_service()
         
-        if not knowledge_base:
-            return create_error_response(
-                ErrorCode.NOT_FOUND,
-                f"知识库不存在: {kb_id}"
+        # 验证知识库是否存在
+        kb = await service.get_knowledge_base(kb_id)
+        if not kb:
+            return ErrorResponse(
+                error=ErrorDetail(
+                    code=ErrorCode.NOT_FOUND,
+                    message=f"知识库不存在: {kb_id}"
+                )
             )
         
-        # TODO: 实现索引重建逻辑
-        # 1. 备份现有向量
-        # 2. 创建新集合（应用新配置）
-        # 3. 迁移向量数据
-        # 4. 切换集合
+        # 执行重建索引
+        success = await service.reindex_knowledge_base(kb_id, optimize_config)
         
-        return create_success_response(
-            data={"kb_id": kb_id, "status": "reindexing"},
-            message="索引重建任务已启动（功能开发中）"
+        return SuccessResponse(
+            data={
+                "knowledge_base_id": kb_id,
+                "reindex_success": success,
+                "optimize_config": optimize_config
+            },
+            message="知识库索引重建成功"
         )
         
     except Exception as e:
-        logger.error(f"重建索引失败: {kb_id} - {e}")
-        return create_error_response(
-            ErrorCode.INTERNAL_SERVER_ERROR,
-            f"重建索引失败: {str(e)}"
+        logger.error(f"知识库索引重建失败: {kb_id} - {e}")
+        return ErrorResponse(
+            error=ErrorDetail(
+                code=ErrorCode.INTERNAL_SERVER_ERROR,
+                message=f"索引重建失败: {str(e)}"
+            )
         ) 
