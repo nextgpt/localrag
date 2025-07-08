@@ -17,8 +17,10 @@ from app.models.knowledge_base import (
 from app.services.cache_service import get_cache_service
 from app.services.vector_service import get_vector_service
 from app.services.document_service import get_document_service
-from app.services.minio_service import get_minio_service
-from app.utils.logger import logger
+from app.services.storage_service import get_minio_service
+import logging
+
+logger = logging.getLogger("rag-anything")
 
 
 class KnowledgeBaseService:
@@ -439,6 +441,119 @@ class KnowledgeBaseService:
         except Exception as e:
             logger.error(f"获取知识库统计失败: {kb_id} - {e}")
             return None
+
+
+    async def vectorize_knowledge_base(self, kb_id: str, priority: int = 0) -> List[str]:
+        """批量向量化知识库中的文件"""
+        await self._get_services()
+        
+        try:
+            # 验证知识库存在
+            knowledge_base = await self.get_knowledge_base(kb_id)
+            if not knowledge_base:
+                raise create_service_exception(
+                    ErrorCode.NOT_FOUND,
+                    f"知识库不存在: {kb_id}"
+                )
+            
+            # 获取知识库中的文件
+            file_ids = await self.get_knowledge_base_files(kb_id)
+            if not file_ids:
+                logger.warning(f"知识库 {kb_id} 中没有文件需要向量化")
+                return []
+            
+            # 启动向量化任务
+            task_ids = []
+            for file_id in file_ids:
+                try:
+                    # 检查文件是否已解析
+                    file_metadata = await self.document_service.get_file_info(file_id)
+                    if file_metadata and file_metadata.get("parse_status") == "completed":
+                        # 启动向量化任务，指定知识库的集合名称
+                        task_id = await self.document_service.start_vectorize_task(
+                            file_id, 
+                            priority,
+                            collection_name=knowledge_base.qdrant_config.collection_name
+                        )
+                        task_ids.append(task_id)
+                    else:
+                        logger.warning(f"文件 {file_id} 尚未解析完成，跳过向量化")
+                except Exception as e:
+                    logger.warning(f"文件 {file_id} 向量化任务启动失败: {e}")
+            
+            logger.info(f"知识库 {kb_id} 向量化任务启动完成: {len(task_ids)}/{len(file_ids)} 个文件")
+            return task_ids
+            
+        except Exception as e:
+            logger.error(f"知识库向量化失败: {kb_id} - {e}")
+            raise create_service_exception(
+                ErrorCode.INTERNAL_SERVER_ERROR,
+                f"知识库向量化失败: {str(e)}"
+            )
+    
+    async def reindex_knowledge_base(self, kb_id: str, optimize_config: Optional[Dict[str, Any]] = None) -> bool:
+        """重建知识库索引"""
+        await self._get_services()
+        
+        try:
+            # 验证知识库存在
+            knowledge_base = await self.get_knowledge_base(kb_id)
+            if not knowledge_base:
+                raise create_service_exception(
+                    ErrorCode.NOT_FOUND,
+                    f"知识库不存在: {kb_id}"
+                )
+            
+            collection_name = knowledge_base.qdrant_config.collection_name
+            
+            # 删除现有向量集合
+            await self.vector_service.delete_collection(collection_name)
+            logger.info(f"已删除知识库 {kb_id} 的向量集合: {collection_name}")
+            
+            # 重新创建向量集合（应用优化配置）
+            vector_size = knowledge_base.qdrant_config.vector_size
+            if optimize_config and "vector_size" in optimize_config:
+                vector_size = optimize_config["vector_size"]
+            
+            success = await self.vector_service.create_collection(
+                collection_name=collection_name,
+                vector_size=vector_size,
+                config=optimize_config
+            )
+            
+            if not success:
+                raise create_service_exception(
+                    ErrorCode.INTERNAL_SERVER_ERROR,
+                    f"重新创建向量集合失败: {collection_name}"
+                )
+            
+            logger.info(f"已重新创建知识库 {kb_id} 的向量集合: {collection_name}")
+            
+            # 重新向量化所有文件
+            task_ids = await self.vectorize_knowledge_base(kb_id, priority=10)  # 高优先级
+            
+            # 更新知识库配置（如果有优化配置）
+            if optimize_config:
+                for key, value in optimize_config.items():
+                    if hasattr(knowledge_base.qdrant_config, key):
+                        setattr(knowledge_base.qdrant_config, key, value)
+                
+                # 保存更新后的配置
+                knowledge_base.updated_at = datetime.now()
+                await self.cache_service.save_data(
+                    f"knowledge_base:{kb_id}",
+                    knowledge_base.dict()
+                )
+            
+            logger.info(f"知识库 {kb_id} 索引重建完成，启动了 {len(task_ids)} 个向量化任务")
+            return True
+            
+        except Exception as e:
+            logger.error(f"知识库索引重建失败: {kb_id} - {e}")
+            raise create_service_exception(
+                ErrorCode.INTERNAL_SERVER_ERROR,
+                f"知识库索引重建失败: {str(e)}"
+            )
 
 
 # 全局知识库服务实例

@@ -810,7 +810,7 @@ class SearchService:
         从MinIO中查找解析结果中的图片
         """
         try:
-            from app.services.minio_service import get_minio_service
+            from app.services.storage_service import get_minio_service
             minio_service = await get_minio_service()
             
             # 获取文件的解析结果路径

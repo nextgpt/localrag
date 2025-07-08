@@ -360,13 +360,14 @@ async def search_knowledge_base(
         
         # 执行搜索
         search_service = SearchService()
-        results = await search_service.search_knowledge_base(
+        results = await search_service.search_in_knowledge_base(
             kb_id=kb_id,
+            collection_name=kb.qdrant_config.collection_name,
             query=request.query,
-            search_type=request.search_type,
             top_k=request.top_k,
             score_threshold=request.score_threshold,
-            include_images=request.include_images
+            return_images=request.include_images,
+            return_metadata=True
         )
         
         return SuccessResponse(
