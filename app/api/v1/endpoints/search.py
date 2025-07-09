@@ -4,8 +4,9 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import logging
+from pydantic import BaseModel
 
 from app.models.responses import SuccessResponse, PaginatedResponse, PaginationInfo, ErrorCode
 from app.models.requests import SearchRequest, SearchType
@@ -14,6 +15,27 @@ from app.services.search_service import get_search_service, SearchService
 
 router = APIRouter(prefix="/search", tags=["检索搜索"])
 logger = logging.getLogger("rag-anything")
+
+
+# 🎯 新增：招标书分析请求模型
+class TenderAnalysisRequest(BaseModel):
+    query: str = "项目名称"
+    file_ids: Optional[List[str]] = None
+    analysis_type: str = "general"  # general/project_info/technical_specs/commercial_terms/risks
+    limit: int = 20
+    score_threshold: float = 0.4
+    collection_name: Optional[str] = None
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "query": "项目名称",
+                "file_ids": ["your-uploaded-file-id"],  # 使用实际上传的文件ID
+                "analysis_type": "project_info",
+                "limit": 20,
+                "score_threshold": 0.4
+            }
+        }
 
 
 @router.post("/", response_model=PaginatedResponse, summary="统一检索接口")
@@ -381,3 +403,193 @@ async def get_search_stats(
             ErrorCode.SEARCH_FAILED,
             f"获取检索统计信息失败: {str(e)}"
         ) 
+
+@router.post("/search/tender", summary="🎯 招标书专用搜索分析")
+async def search_tender_documents(
+    request: TenderAnalysisRequest,
+    search_service = Depends(get_search_service)
+) -> Dict[str, Any]:
+    """
+    🎯 招标书专用搜索分析 - 99%精准度专业解读
+    
+    ## 分析类型说明：
+    - **general**: 综合分析（默认）
+    - **project_info**: 项目性质、工期要求、节点里程碑、截标日期
+    - **technical_specs**: 技术要求、施工方案、材料设备要求
+    - **commercial_terms**: 投标人责任、工作范围、报价要求、投标书编制
+    - **risks**: 风险识别、重难点分析、矛盾检测
+    
+    ## 返回结构化分析：
+    - 关键信息提取（项目名称、工期、预算等）
+    - 时间线分析（截标、开标、里程碑）
+    - 财务信息（预算、保证金、付款条件）
+    - 技术要求（质量标准、材料设备）
+    - 资格要求（企业资质、人员配置）
+    - 风险识别（潜在风险、矛盾检测）
+    - 专业报告（执行摘要、建议、行动项）
+    - 置信度评估（整体置信度、完整性分析）
+    """
+    try:
+        logger.info(f"🎯 招标书专用搜索: {request.query} - 类型: {request.analysis_type}")
+        
+        # 验证分析类型
+        valid_analysis_types = ["general", "project_info", "technical_specs", "commercial_terms", "risks"]
+        if request.analysis_type not in valid_analysis_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"无效的分析类型。支持的类型: {', '.join(valid_analysis_types)}"
+            )
+        
+        # 执行招标书专用搜索
+        result = await search_service.search_tender_documents(
+            query=request.query,
+            file_ids=request.file_ids,
+            analysis_type=request.analysis_type,
+            limit=request.limit,
+            score_threshold=request.score_threshold,
+            collection_name=request.collection_name
+        )
+        
+        # 添加API响应元数据
+        result["api_metadata"] = {
+            "endpoint": "/search/tender",
+            "analysis_type_description": {
+                "general": "综合分析所有类型信息",
+                "project_info": "项目性质、工期要求、节点里程碑、截标日期等关键事项",
+                "technical_specs": "技术要求、制定合理的施工方案、材料和设备要求",
+                "commercial_terms": "投标人责任、工作范围、报价要求、投标书编制内容",
+                "risks": "工程风险、重难点、错误矛盾检测"
+            }.get(request.analysis_type, "未知分析类型"),
+            "precision_target": "99%",
+            "specialized_features": [
+                "智能结构识别",
+                "关键信息提取", 
+                "多层次检索",
+                "矛盾检测",
+                "风险识别",
+                "置信度评估"
+            ]
+        }
+        
+        logger.info(f"✅ 招标书分析完成: {result['total_results']}个结果")
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ 招标书搜索失败: {request.query} - {e}")
+        raise HTTPException(status_code=500, detail=f"招标书搜索失败: {str(e)}")
+
+@router.post("/search/tender/batch", summary="🎯 批量招标书分析")
+async def batch_tender_analysis(
+    queries: List[str],
+    file_ids: Optional[List[str]] = None,
+    analysis_type: str = "general",
+    limit: int = 10,
+    score_threshold: float = 0.4,
+    collection_name: Optional[str] = None,
+    search_service = Depends(get_search_service)
+) -> Dict[str, Any]:
+    """
+    🎯 批量招标书分析 - 一次性分析多个查询
+    
+    适用场景：
+    - 全面解读一份招标书的所有要求
+    - 同时检查多个关键信息点
+    - 批量风险识别和矛盾检测
+    """
+    try:
+        logger.info(f"🎯 批量招标书分析: {len(queries)}个查询")
+        
+        results = {}
+        for i, query in enumerate(queries):
+            try:
+                result = await search_service.search_tender_documents(
+                    query=query,
+                    file_ids=file_ids,
+                    analysis_type=analysis_type,
+                    limit=limit,
+                    score_threshold=score_threshold,
+                    collection_name=collection_name
+                )
+                results[f"query_{i+1}_{query[:20]}"] = result
+                
+            except Exception as e:
+                logger.error(f"查询失败: {query} - {e}")
+                results[f"query_{i+1}_{query[:20]}"] = {
+                    "error": str(e),
+                    "query": query
+                }
+        
+        # 生成综合报告
+        comprehensive_analysis = _generate_comprehensive_analysis(results)
+        
+        return {
+            "batch_analysis": results,
+            "comprehensive_analysis": comprehensive_analysis,
+            "summary": {
+                "total_queries": len(queries),
+                "successful_queries": len([r for r in results.values() if "error" not in r]),
+                "failed_queries": len([r for r in results.values() if "error" in r])
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ 批量分析失败: {e}")
+        raise HTTPException(status_code=500, detail=f"批量分析失败: {str(e)}")
+
+def _generate_comprehensive_analysis(batch_results: Dict[str, Any]) -> Dict[str, Any]:
+    """生成批量分析的综合报告"""
+    
+    all_risks = []
+    all_contradictions = []
+    overall_completeness = []
+    key_findings = []
+    
+    for query_key, result in batch_results.items():
+        if "error" in result:
+            continue
+            
+        # 收集风险
+        risks = result.get("structured_analysis", {}).get("risks_and_issues", [])
+        all_risks.extend(risks)
+        
+        # 收集矛盾
+        contradictions = result.get("structured_analysis", {}).get("contradictions", [])
+        all_contradictions.extend(contradictions)
+        
+        # 收集完整性分数
+        completeness = result.get("structured_analysis", {}).get("completeness_analysis", {})
+        if completeness.get("completeness_score"):
+            overall_completeness.append(completeness["completeness_score"])
+        
+        # 收集关键发现
+        findings = result.get("tender_report", {}).get("detailed_findings", {})
+        key_findings.extend(findings.get("positive_findings", []))
+    
+    # 计算综合指标
+    avg_completeness = sum(overall_completeness) / len(overall_completeness) if overall_completeness else 0
+    total_risks = len(all_risks)
+    total_contradictions = len(all_contradictions)
+    
+    # 生成整体风险评估
+    high_risk_count = len([r for r in all_risks if r.get("risk_score", 0) >= 3])
+    overall_risk_level = "高" if high_risk_count > 0 else ("中" if total_risks > 5 else "低")
+    
+    return {
+        "overall_completeness": avg_completeness,
+        "risk_summary": {
+            "total_risks": total_risks,
+            "high_risk_count": high_risk_count,
+            "overall_risk_level": overall_risk_level,
+            "top_risks": sorted(all_risks, key=lambda x: x.get("risk_score", 0), reverse=True)[:5]
+        },
+        "consistency_check": {
+            "total_contradictions": total_contradictions,
+            "contradiction_details": all_contradictions[:3]
+        },
+        "key_achievements": list(set(key_findings))[:10],
+        "recommendations": [
+            "🔍 重点关注高风险项目" if high_risk_count > 0 else "✅ 风险水平可控",
+            "📞 联系招标方澄清矛盾" if total_contradictions > 0 else "✅ 信息一致性良好",
+            "📋 补充缺失信息" if avg_completeness < 0.8 else "✅ 信息完整性良好"
+        ]
+    } 

@@ -896,6 +896,788 @@ class SearchService:
             logger.error(f"获取知识库图片画廊失败: {kb_id} - {e}")
             return []
 
+    async def search_tender_documents(
+        self,
+        query: str,
+        file_ids: Optional[List[str]] = None,
+        analysis_type: str = "general",
+        limit: int = 20,
+        score_threshold: float = 0.4,  # 降低阈值，提高召回
+        collection_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """🎯 招标书专用搜索分析
+        
+        Args:
+            query: 搜索查询
+            file_ids: 文件ID列表
+            analysis_type: 分析类型 (general/project_info/technical_specs/commercial_terms/risks)
+            limit: 结果数量限制
+            score_threshold: 相似度阈值
+            collection_name: 向量集合名称
+        
+        Returns:
+            结构化的招标书分析结果
+        """
+        try:
+            await self._get_services()
+            
+            # 1️⃣ 查询预处理和扩展
+            enhanced_queries = self._expand_tender_query(query, analysis_type)
+            
+            # 2️⃣ 多层次检索策略
+            all_results = []
+            for enhanced_query in enhanced_queries:
+                results = await self.vector_search(
+                    query=enhanced_query["query"],
+                    file_ids=file_ids,
+                    limit=limit * 2,  # 增大搜索范围
+                    score_threshold=score_threshold,
+                    collection_name=collection_name
+                )
+                
+                # 为结果添加查询类型标记
+                for result in results:
+                    result["query_type"] = enhanced_query["type"]
+                    result["query_importance"] = enhanced_query["importance"]
+                
+                all_results.extend(results)
+            
+            # 3️⃣ 结果去重和重新排序
+            deduped_results = self._deduplicate_tender_results(all_results)
+            reranked_results = self._rerank_tender_results(deduped_results, query, analysis_type)
+            
+            # 4️⃣ 结构化分析
+            structured_analysis = await self._analyze_tender_results(
+                reranked_results[:limit], 
+                query, 
+                analysis_type
+            )
+            
+            # 5️⃣ 生成专业报告
+            tender_report = self._generate_tender_report(
+                structured_analysis, 
+                query, 
+                analysis_type
+            )
+            
+            logger.info(f"🎯 招标书专用搜索完成: 查询='{query}' 类型={analysis_type} 找到{len(reranked_results)}个结果")
+            
+            return {
+                "query": query,
+                "analysis_type": analysis_type,
+                "search_results": reranked_results[:limit],
+                "structured_analysis": structured_analysis,
+                "tender_report": tender_report,
+                "total_results": len(reranked_results),
+                "search_strategy": {
+                    "enhanced_queries": len(enhanced_queries),
+                    "score_threshold": score_threshold,
+                    "deduplication": len(all_results) - len(deduped_results)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"招标书专用搜索失败: {query} - {e}")
+            raise create_service_exception(
+                ErrorCode.SEARCH_FAILED,
+                f"招标书搜索失败: {str(e)}"
+            )
+    
+    def _expand_tender_query(self, query: str, analysis_type: str) -> List[Dict[str, Any]]:
+        """🔍 招标书查询扩展和优化"""
+        
+        # 基础查询
+        enhanced_queries = [{
+            "query": query,
+            "type": "original",
+            "importance": 1.0
+        }]
+        
+        # 根据分析类型扩展查询
+        if analysis_type == "project_info":
+            # 项目信息相关扩展
+            project_expansions = [
+                f"{query} 项目概况",
+                f"{query} 工程概况", 
+                f"{query} 建设规模",
+                f"项目性质 {query}",
+                f"建设地点 {query}"
+            ]
+            for exp in project_expansions:
+                enhanced_queries.append({
+                    "query": exp,
+                    "type": "project_context",
+                    "importance": 0.8
+                })
+        
+        elif analysis_type == "technical_specs":
+            # 技术规范扩展
+            tech_expansions = [
+                f"{query} 技术要求",
+                f"{query} 质量标准",
+                f"{query} 施工工艺",
+                f"技术规范 {query}",
+                f"工程标准 {query}"
+            ]
+            for exp in tech_expansions:
+                enhanced_queries.append({
+                    "query": exp,
+                    "type": "technical_context",
+                    "importance": 0.9
+                })
+        
+        elif analysis_type == "commercial_terms":
+            # 商务条款扩展
+            commercial_expansions = [
+                f"{query} 报价要求",
+                f"{query} 付款条件",
+                f"{query} 合同条款",
+                f"商务要求 {query}",
+                f"价格 {query}"
+            ]
+            for exp in commercial_expansions:
+                enhanced_queries.append({
+                    "query": exp,
+                    "type": "commercial_context", 
+                    "importance": 0.85
+                })
+        
+        elif analysis_type == "risks":
+            # 风险分析扩展
+            risk_expansions = [
+                f"{query} 风险",
+                f"{query} 难点",
+                f"{query} 注意事项",
+                f"风险点 {query}",
+                f"潜在问题 {query}"
+            ]
+            for exp in risk_expansions:
+                enhanced_queries.append({
+                    "query": exp,
+                    "type": "risk_context",
+                    "importance": 0.7
+                })
+        
+        # 添加同义词扩展
+        synonym_map = {
+            "招标人": ["发包方", "建设单位", "业主方"],
+            "投标人": ["承包方", "施工单位", "投标方"],
+            "工期": ["施工周期", "建设周期", "完工时间"],
+            "质量": ["品质", "标准", "等级"],
+            "材料": ["物料", "建材", "原材料"],
+            "设备": ["机械", "器械", "装备"]
+        }
+        
+        for term, synonyms in synonym_map.items():
+            if term in query:
+                for synonym in synonyms:
+                    syn_query = query.replace(term, synonym)
+                    enhanced_queries.append({
+                        "query": syn_query,
+                        "type": "synonym",
+                        "importance": 0.6
+                    })
+        
+        return enhanced_queries
+    
+    def _deduplicate_tender_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """去重招标书搜索结果"""
+        seen_chunks = set()
+        deduped_results = []
+        
+        for result in results:
+            chunk_id = result.get("chunk_id")
+            if chunk_id and chunk_id not in seen_chunks:
+                seen_chunks.add(chunk_id)
+                deduped_results.append(result)
+        
+        return deduped_results
+    
+    def _rerank_tender_results(self, results: List[Dict[str, Any]], query: str, analysis_type: str) -> List[Dict[str, Any]]:
+        """🎯 招标书结果重新排序"""
+        
+        for result in results:
+            original_score = result.get("score", 0.0)
+            
+            # 1️⃣ 基于块类型的权重调整
+            block_type = result.get("block_type", "text")
+            type_boost = {
+                "key_info_date_info": 0.2,
+                "key_info_amount_info": 0.25,
+                "key_info_tech_requirement": 0.2,
+                "key_info_qualification": 0.15,
+                "table": 0.15,
+                "section_aligned": 0.1,
+                "text": 0.0
+            }.get(block_type, 0.0)
+            
+            # 2️⃣ 基于查询类型的权重调整
+            query_type = result.get("query_type", "original")
+            query_boost = {
+                "original": 0.0,
+                "project_context": 0.1 if analysis_type == "project_info" else 0.05,
+                "technical_context": 0.15 if analysis_type == "technical_specs" else 0.05,
+                "commercial_context": 0.1 if analysis_type == "commercial_terms" else 0.05,
+                "risk_context": 0.1 if analysis_type == "risks" else 0.05,
+                "synonym": -0.05  # 同义词查询略微降权
+            }.get(query_type, 0.0)
+            
+            # 3️⃣ 基于重要性分数的调整
+            importance_score = result.get("tender_info", {}).get("importance_score", 0.5)
+            importance_boost = (importance_score - 0.5) * 0.1  # 重要性分数转换为boost
+            
+            # 4️⃣ 基于结构化数据的加权
+            has_structured_data = bool(result.get("tender_info", {}).get("structured_data"))
+            structured_boost = 0.05 if has_structured_data else 0.0
+            
+            # 计算最终分数
+            final_score = original_score + type_boost + query_boost + importance_boost + structured_boost
+            result["final_score"] = min(1.0, final_score)
+            result["score_details"] = {
+                "original": original_score,
+                "type_boost": type_boost,
+                "query_boost": query_boost,
+                "importance_boost": importance_boost,
+                "structured_boost": structured_boost
+            }
+        
+                # 按最终分数排序
+        results.sort(key=lambda x: x.get("final_score", 0.0), reverse=True)
+        return results
+    
+    async def _analyze_tender_results(self, results: List[Dict[str, Any]], query: str, analysis_type: str) -> Dict[str, Any]:
+        """🔬 结构化分析招标书搜索结果"""
+        
+        analysis = {
+            "key_information": self._extract_key_information(results),
+            "dates_timeline": self._extract_dates_timeline(results),
+            "financial_info": self._extract_financial_info(results),
+            "technical_requirements": self._extract_technical_requirements(results),
+            "qualification_requirements": self._extract_qualification_requirements(results),
+            "risks_and_issues": self._identify_risks_and_issues(results),
+            "contradictions": self._detect_contradictions(results),
+            "completeness_analysis": self._analyze_completeness(results, analysis_type)
+        }
+        
+        return analysis
+    
+    def _extract_key_information(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """提取关键信息"""
+        key_info = {
+            "project_name": [],
+            "project_location": [],
+            "project_scale": [],
+            "construction_period": [],
+            "budget": []
+        }
+        
+        for result in results:
+            text = result.get("text", "")
+            structured_data = result.get("tender_info", {}).get("structured_data", {})
+            
+            # 项目名称
+            if any(keyword in text for keyword in ["项目名称", "工程名称", "工程项目"]):
+                key_info["project_name"].append({
+                    "text": text[:200],
+                    "score": result.get("final_score", 0),
+                    "source": result.get("chunk_id")
+                })
+            
+            # 建设地点
+            if any(keyword in text for keyword in ["建设地点", "施工地点", "工程地址"]):
+                key_info["project_location"].append({
+                    "text": text[:200],
+                    "score": result.get("final_score", 0),
+                    "source": result.get("chunk_id")
+                })
+            
+            # 建设规模
+            if any(keyword in text for keyword in ["建设规模", "工程规模", "项目规模"]):
+                key_info["project_scale"].append({
+                    "text": text[:200],
+                    "score": result.get("final_score", 0),
+                    "source": result.get("chunk_id")
+                })
+            
+            # 工期信息
+            if structured_data.get("dates") or any(keyword in text for keyword in ["工期", "施工周期", "建设周期"]):
+                key_info["construction_period"].append({
+                    "text": text[:200],
+                    "dates": structured_data.get("dates", []),
+                    "score": result.get("final_score", 0),
+                    "source": result.get("chunk_id")
+                })
+            
+            # 预算信息
+            if structured_data.get("amounts") or any(keyword in text for keyword in ["预算", "投资", "限价"]):
+                key_info["budget"].append({
+                    "text": text[:200],
+                    "amounts": structured_data.get("amounts", []),
+                    "score": result.get("final_score", 0),
+                    "source": result.get("chunk_id")
+                })
+        
+        # 按分数排序并去重
+        for category in key_info:
+            key_info[category] = sorted(key_info[category], key=lambda x: x["score"], reverse=True)[:3]
+        
+        return key_info
+    
+    def _extract_dates_timeline(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """提取时间线信息"""
+        timeline = {
+            "bidding_deadline": [],
+            "opening_time": [],
+            "construction_start": [],
+            "construction_end": [],
+            "milestones": []
+        }
+        
+        for result in results:
+            text = result.get("text", "")
+            structured_data = result.get("tender_info", {}).get("structured_data", {})
+            
+            # 截标时间
+            if any(keyword in text for keyword in ["截标时间", "投标截止", "递交截止"]):
+                timeline["bidding_deadline"].append({
+                    "text": text[:200],
+                    "dates": structured_data.get("deadlines", []),
+                    "score": result.get("final_score", 0)
+                })
+            
+            # 开标时间  
+            if any(keyword in text for keyword in ["开标时间", "开标日期"]):
+                timeline["opening_time"].append({
+                    "text": text[:200],
+                    "dates": structured_data.get("dates", []),
+                    "score": result.get("final_score", 0)
+                })
+            
+            # 里程碑节点
+            if any(keyword in text for keyword in ["里程碑", "节点", "关键节点", "重要节点"]):
+                timeline["milestones"].append({
+                    "text": text[:200],
+                    "dates": structured_data.get("dates", []),
+                    "score": result.get("final_score", 0)
+                })
+        
+        return timeline
+    
+    def _extract_financial_info(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """提取财务信息"""
+        financial = {
+            "budget_limit": [],
+            "bid_bond": [],
+            "performance_bond": [],
+            "payment_terms": []
+        }
+        
+        for result in results:
+            text = result.get("text", "")
+            structured_data = result.get("tender_info", {}).get("structured_data", {})
+            
+            # 预算限价
+            if any(keyword in text for keyword in ["投标限价", "预算金额", "控制价"]):
+                financial["budget_limit"].append({
+                    "text": text[:200],
+                    "amounts": structured_data.get("amounts", []),
+                    "score": result.get("final_score", 0)
+                })
+            
+            # 投标保证金
+            if any(keyword in text for keyword in ["投标保证金", "保证金"]):
+                financial["bid_bond"].append({
+                    "text": text[:200], 
+                    "amounts": structured_data.get("amounts", []),
+                    "score": result.get("final_score", 0)
+                })
+            
+            # 履约保证金
+            if any(keyword in text for keyword in ["履约保证金", "履约保证"]):
+                financial["performance_bond"].append({
+                    "text": text[:200],
+                    "amounts": structured_data.get("amounts", []),
+                    "score": result.get("final_score", 0)
+                })
+            
+            # 付款条件
+            if any(keyword in text for keyword in ["付款条件", "付款方式", "结算方式"]):
+                financial["payment_terms"].append({
+                    "text": text[:200],
+                    "score": result.get("final_score", 0)
+                })
+        
+        return financial
+    
+    def _extract_technical_requirements(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """提取技术要求"""
+        technical = {
+            "quality_standards": [],
+            "technical_specs": [],
+            "materials": [],
+            "equipment": [],
+            "construction_methods": []
+        }
+        
+        for result in results:
+            text = result.get("text", "")
+            block_type = result.get("block_type", "")
+            
+            # 技术要求相关内容
+            if block_type == "key_info_tech_requirement" or any(keyword in text for keyword in ["质量标准", "质量等级"]):
+                technical["quality_standards"].append({
+                    "text": text[:300],
+                    "score": result.get("final_score", 0)
+                })
+            
+            if any(keyword in text for keyword in ["技术规范", "技术标准", "技术要求"]):
+                technical["technical_specs"].append({
+                    "text": text[:300],
+                    "score": result.get("final_score", 0)
+                })
+            
+            if any(keyword in text for keyword in ["材料要求", "材料标准", "材料规格"]):
+                technical["materials"].append({
+                    "text": text[:300],
+                    "score": result.get("final_score", 0)
+                })
+            
+            if any(keyword in text for keyword in ["设备要求", "设备规格", "机械设备"]):
+                technical["equipment"].append({
+                    "text": text[:300],
+                    "score": result.get("final_score", 0)
+                })
+            
+            if any(keyword in text for keyword in ["施工方法", "施工工艺", "施工技术"]):
+                technical["construction_methods"].append({
+                    "text": text[:300],
+                    "score": result.get("final_score", 0)
+                })
+        
+        return technical
+    
+    def _extract_qualification_requirements(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """提取资格要求"""
+        qualification = {
+            "company_qualifications": [],
+            "personnel_requirements": [],
+            "experience_requirements": [],
+            "financial_requirements": []
+        }
+        
+        for result in results:
+            text = result.get("text", "")
+            block_type = result.get("block_type", "")
+            
+            if block_type == "key_info_qualification" or any(keyword in text for keyword in ["资质要求", "企业资质"]):
+                qualification["company_qualifications"].append({
+                    "text": text[:300],
+                    "score": result.get("final_score", 0)
+                })
+            
+            if any(keyword in text for keyword in ["人员要求", "项目经理", "技术负责人"]):
+                qualification["personnel_requirements"].append({
+                    "text": text[:300],
+                    "score": result.get("final_score", 0)
+                })
+            
+            if any(keyword in text for keyword in ["业绩要求", "类似工程", "施工经验"]):
+                qualification["experience_requirements"].append({
+                    "text": text[:300],
+                    "score": result.get("final_score", 0)
+                })
+            
+            if any(keyword in text for keyword in ["注册资金", "财务状况", "资产状况"]):
+                qualification["financial_requirements"].append({
+                    "text": text[:300],
+                    "score": result.get("final_score", 0)
+                })
+        
+        return qualification
+    
+    def _identify_risks_and_issues(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """识别风险和问题点"""
+        risks = []
+        
+        risk_keywords = [
+            "风险", "难点", "注意", "特殊要求", "限制", "禁止",
+            "严禁", "必须", "不得", "应当", "违约", "罚款", "扣分"
+        ]
+        
+        for result in results:
+            text = result.get("text", "")
+            risk_score = 0
+            
+            for keyword in risk_keywords:
+                if keyword in text:
+                    risk_score += 1
+            
+            if risk_score > 0:
+                risks.append({
+                    "text": text[:400],
+                    "risk_score": risk_score,
+                    "final_score": result.get("final_score", 0),
+                    "risk_keywords": [kw for kw in risk_keywords if kw in text]
+                })
+        
+        # 按风险分数排序
+        risks.sort(key=lambda x: (x["risk_score"], x["final_score"]), reverse=True)
+        return risks[:10]  # 返回前10个风险点
+    
+    def _detect_contradictions(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """检测矛盾和不一致"""
+        # 这是一个简化的矛盾检测，实际应用中可以更复杂
+        contradictions = []
+        
+        # 检查日期矛盾
+        all_dates = []
+        for result in results:
+            structured_data = result.get("tender_info", {}).get("structured_data", {})
+            dates = structured_data.get("dates", [])
+            for date in dates:
+                all_dates.append({
+                    "date": date,
+                    "source": result.get("chunk_id"),
+                    "text": result.get("text", "")[:100]
+                })
+        
+        # 检查金额矛盾
+        all_amounts = []
+        for result in results:
+            structured_data = result.get("tender_info", {}).get("structured_data", {})
+            amounts = structured_data.get("amounts", [])
+            for amount in amounts:
+                all_amounts.append({
+                    "amount": amount,
+                    "source": result.get("chunk_id"),
+                    "text": result.get("text", "")[:100]
+                })
+        
+        # 检测逻辑可以在这里扩展
+        if len(set([d["date"] for d in all_dates])) != len(all_dates):
+            contradictions.append({
+                "type": "date_inconsistency",
+                "description": "发现重复或相互矛盾的日期信息",
+                "details": all_dates
+            })
+        
+        return contradictions
+    
+    def _analyze_completeness(self, results: List[Dict[str, Any]], analysis_type: str) -> Dict[str, Any]:
+        """分析信息完整性"""
+        
+        # 根据分析类型定义必需信息
+        required_info = {
+            "project_info": ["项目名称", "建设地点", "建设规模", "项目性质"],
+            "technical_specs": ["技术标准", "质量要求", "材料规格", "施工方法"],
+            "commercial_terms": ["预算限价", "付款条件", "保证金", "合同条款"],
+            "risks": ["风险提示", "注意事项", "特殊要求", "违约条款"]
+        }
+        
+        found_info = set()
+        missing_info = []
+        
+        # 检查已找到的信息
+        for result in results:
+            text = result.get("text", "")
+            for category, keywords in required_info.items():
+                if analysis_type == "general" or analysis_type == category:
+                    for keyword in keywords:
+                        if keyword in text:
+                            found_info.add(keyword)
+        
+        # 确定缺失信息
+        for category, keywords in required_info.items():
+            if analysis_type == "general" or analysis_type == category:
+                for keyword in keywords:
+                    if keyword not in found_info:
+                        missing_info.append(keyword)
+        
+        total_required = sum(len(keywords) for category, keywords in required_info.items() 
+                            if analysis_type == "general" or analysis_type == category)
+        
+        completeness_score = len(found_info) / total_required if total_required > 0 else 1.0
+        
+        return {
+            "completeness_score": completeness_score,
+            "found_information": list(found_info),
+            "missing_information": missing_info,
+            "coverage_analysis": f"覆盖了 {len(found_info)}/{total_required} 项必需信息"
+        }
+    
+    def _generate_tender_report(self, analysis: Dict[str, Any], query: str, analysis_type: str) -> Dict[str, Any]:
+        """🎯 生成招标书专业分析报告"""
+        
+        report = {
+            "executive_summary": self._generate_executive_summary(analysis, query),
+            "detailed_findings": self._generate_detailed_findings(analysis, analysis_type),
+            "recommendations": self._generate_recommendations(analysis, analysis_type),
+            "risk_assessment": self._generate_risk_assessment(analysis),
+            "action_items": self._generate_action_items(analysis, analysis_type),
+            "confidence_metrics": self._calculate_confidence_metrics(analysis)
+        }
+        
+        return report
+    
+    def _generate_executive_summary(self, analysis: Dict[str, Any], query: str) -> str:
+        """生成执行摘要"""
+        key_info = analysis.get("key_information", {})
+        completeness = analysis.get("completeness_analysis", {})
+        risks = analysis.get("risks_and_issues", [])
+        
+        summary_parts = [
+            f"针对查询「{query}」的招标书分析结果如下：",
+            f"信息完整性评分：{completeness.get('completeness_score', 0):.1%}",
+            f"识别风险点：{len(risks)}个",
+            f"关键信息覆盖：{completeness.get('coverage_analysis', '未知')}"
+        ]
+        
+        # 添加关键发现
+        if key_info.get("project_name"):
+            summary_parts.append(f"项目信息：已识别项目名称等基本信息")
+        
+        if analysis.get("financial_info", {}).get("budget_limit"):
+            summary_parts.append(f"财务信息：已识别预算限价等财务条款")
+        
+        return "\n".join(summary_parts)
+    
+    def _generate_detailed_findings(self, analysis: Dict[str, Any], analysis_type: str) -> Dict[str, List[str]]:
+        """生成详细发现"""
+        findings = {
+            "positive_findings": [],
+            "concerns": [],
+            "missing_information": []
+        }
+        
+        # 正面发现
+        if analysis.get("key_information", {}).get("project_name"):
+            findings["positive_findings"].append("✅ 项目基本信息完整")
+        
+        if analysis.get("dates_timeline", {}).get("bidding_deadline"):
+            findings["positive_findings"].append("✅ 关键时间节点明确")
+        
+        if analysis.get("financial_info", {}).get("budget_limit"):
+            findings["positive_findings"].append("✅ 财务条款清晰")
+        
+        # 关注点
+        risks = analysis.get("risks_and_issues", [])
+        if len(risks) > 5:
+            findings["concerns"].append(f"⚠️ 识别到{len(risks)}个潜在风险点，需要重点关注")
+        
+        contradictions = analysis.get("contradictions", [])
+        if contradictions:
+            findings["concerns"].append(f"⚠️ 发现{len(contradictions)}处信息不一致，需要澄清")
+        
+        # 缺失信息
+        missing = analysis.get("completeness_analysis", {}).get("missing_information", [])
+        for item in missing[:5]:  # 只显示前5个
+            findings["missing_information"].append(f"❌ 缺少{item}相关信息")
+        
+        return findings
+    
+    def _generate_recommendations(self, analysis: Dict[str, Any], analysis_type: str) -> List[str]:
+        """生成建议"""
+        recommendations = []
+        
+        completeness_score = analysis.get("completeness_analysis", {}).get("completeness_score", 0)
+        
+        if completeness_score < 0.7:
+            recommendations.append("🔍 建议进一步收集缺失的关键信息")
+        
+        risks = analysis.get("risks_and_issues", [])
+        if risks:
+            recommendations.append("⚠️ 建议针对识别的风险点制定应对措施")
+        
+        contradictions = analysis.get("contradictions", [])
+        if contradictions:
+            recommendations.append("📞 建议联系招标方澄清矛盾信息")
+        
+        if analysis_type == "technical_specs":
+            tech_req = analysis.get("technical_requirements", {})
+            if not tech_req.get("quality_standards"):
+                recommendations.append("🏗️ 建议明确质量标准要求")
+        
+        return recommendations
+    
+    def _generate_risk_assessment(self, analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """生成风险评估"""
+        risks = analysis.get("risks_and_issues", [])
+        
+        risk_levels = {"高": 0, "中": 0, "低": 0}
+        
+        for risk in risks:
+            risk_score = risk.get("risk_score", 0)
+            if risk_score >= 3:
+                risk_levels["高"] += 1
+            elif risk_score >= 2:
+                risk_levels["中"] += 1
+            else:
+                risk_levels["低"] += 1
+        
+        total_risks = sum(risk_levels.values())
+        overall_risk = "低"
+        if risk_levels["高"] > 0:
+            overall_risk = "高"
+        elif risk_levels["中"] > 2:
+            overall_risk = "中"
+        
+        return {
+            "overall_risk_level": overall_risk,
+            "risk_distribution": risk_levels,
+            "total_risks": total_risks,
+            "top_risks": risks[:3] if risks else []
+        }
+    
+    def _generate_action_items(self, analysis: Dict[str, Any], analysis_type: str) -> List[Dict[str, Any]]:
+        """生成行动项"""
+        actions = []
+        
+        # 基于缺失信息生成行动项
+        missing = analysis.get("completeness_analysis", {}).get("missing_information", [])
+        for item in missing[:3]:
+            actions.append({
+                "action": f"收集{item}相关信息",
+                "priority": "高",
+                "category": "信息收集"
+            })
+        
+        # 基于风险生成行动项
+        risks = analysis.get("risks_and_issues", [])
+        for risk in risks[:2]:
+            actions.append({
+                "action": f"分析风险：{risk.get('text', '')[:50]}...",
+                "priority": "中",
+                "category": "风险分析"
+            })
+        
+        return actions
+    
+    def _calculate_confidence_metrics(self, analysis: Dict[str, Any]) -> Dict[str, float]:
+        """计算置信度指标"""
+        
+        completeness_score = analysis.get("completeness_analysis", {}).get("completeness_score", 0)
+        risks_count = len(analysis.get("risks_and_issues", []))
+        contradictions_count = len(analysis.get("contradictions", []))
+        
+        # 信息完整性置信度
+        info_confidence = completeness_score
+        
+        # 风险识别置信度（风险点越多，置信度越高）
+        risk_confidence = min(1.0, risks_count / 10)
+        
+        # 一致性置信度（矛盾越少，置信度越高）
+        consistency_confidence = max(0.0, 1.0 - contradictions_count * 0.2)
+        
+        # 整体置信度
+        overall_confidence = (info_confidence + risk_confidence + consistency_confidence) / 3
+        
+        return {
+            "overall_confidence": overall_confidence,
+            "information_completeness": info_confidence,
+            "risk_identification": risk_confidence,
+            "consistency_check": consistency_confidence
+        }
+
 
 # 全局搜索服务实例
 search_service = SearchService()
