@@ -3,3 +3,438 @@ description:
 globs:
 alwaysApply: false
 ---
+# FastAPI Development Rules for RAG-Anything
+
+## FastAPI 项目结构
+
+### 推荐的目录结构
+```
+app/
+├── api/                    # API 路由
+│   ├── __init__.py
+│   ├── deps.py            # 依赖注入
+│   ├── v1/                # API 版本
+│   │   ├── __init__.py
+│   │   ├── endpoints/     # 具体端点
+│   │   │   ├── upload.py
+│   │   │   ├── documents.py
+│   │   │   ├── search.py
+│   │   │   └── tasks.py
+│   │   └── api.py        # 路由汇总
+├── core/                  # 核心配置
+│   ├── __init__.py
+│   ├── config.py         # 配置管理
+│   ├── security.py       # 安全相关
+│   └── exceptions.py     # 异常处理
+├── models/               # 数据模型
+│   ├── __init__.py
+│   ├── requests.py       # 请求模型
+│   ├── responses.py      # 响应模型
+│   └── database.py       # 数据库模型
+├── services/             # 业务逻辑
+│   ├── __init__.py
+│   ├── document_service.py
+│   ├── search_service.py
+│   └── task_service.py
+├── utils/                # 工具函数
+│   ├── __init__.py
+│   ├── file_utils.py
+│   └── async_utils.py
+└── main.py              # 应用入口
+```
+
+## 核心配置管理
+
+### 环境配置类
+```python
+from pydantic_settings import BaseSettings
+from typing import Optional
+
+class Settings(BaseSettings):
+    # 服务器配置
+    host: str = "0.0.0.0"
+    port: int = 8000
+    
+    # 数据库配置
+    qdrant_host: str = "192.168.30.54"
+    qdrant_port: int = 6333
+    redis_host: str = "192.168.30.54"
+    redis_port: int = 6379
+    redis_password: str = "8i9o0p-["
+    
+    # MinIO 配置
+    minio_host: str = "192.168.30.54"
+    minio_port: int = 19000
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    
+    # AI 服务配置
+    sglang_base_url: str = "http://192.168.30.54:30000"
+    embedding_base_url: str = "http://192.168.30.54:8011/v1"
+    embedding_model: str = "Qwen3-Embedding-8B"
+    
+    # 文件处理配置
+    max_file_size: int = 100 * 1024 * 1024  # 100MB
+    allowed_extensions: list = [".pdf", ".docx", ".pptx", ".xlsx", ".jpg", ".png"]
+    upload_path: str = "./uploads"
+    parsed_output_path: str = "./parsed_output"
+    
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+```
+
+## 异步处理模式
+
+### 任务管理系统
+```python
+import asyncio
+import uuid
+from typing import Dict, Any, Optional
+from enum import Enum
+
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+class TaskManager:
+    def __init__(self):
+        self.tasks: Dict[str, Dict[str, Any]] = {}
+        
+    async def create_task(self, task_func, *args, **kwargs) -> str:
+        task_id = str(uuid.uuid4())
+        
+        self.tasks[task_id] = {
+            "status": TaskStatus.PENDING,
+            "result": None,
+            "error": None,
+            "progress": 0,
+            "created_at": datetime.utcnow()
+        }
+        
+        # 启动异步任务
+        asyncio.create_task(self._run_task(task_id, task_func, *args, **kwargs))
+        return task_id
+    
+    async def _run_task(self, task_id: str, task_func, *args, **kwargs):
+        try:
+            self.tasks[task_id]["status"] = TaskStatus.RUNNING
+            result = await task_func(*args, **kwargs)
+            self.tasks[task_id]["status"] = TaskStatus.COMPLETED
+            self.tasks[task_id]["result"] = result
+        except Exception as e:
+            self.tasks[task_id]["status"] = TaskStatus.FAILED
+            self.tasks[task_id]["error"] = str(e)
+    
+    def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
+        return self.tasks.get(task_id)
+
+task_manager = TaskManager()
+```
+
+## API 错误处理
+
+### 统一错误响应模型
+```python
+from pydantic import BaseModel
+from typing import Optional, List, Any
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    field: Optional[str] = None
+
+class ErrorResponse(BaseModel):
+    success: bool = False
+    error: ErrorDetail
+    request_id: Optional[str] = None
+    timestamp: str
+
+class SuccessResponse(BaseModel):
+    success: bool = True
+    data: Any
+    message: Optional[str] = None
+    request_id: Optional[str] = None
+    timestamp: str
+```
+
+### 全局异常处理器
+```python
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.exception_handlers import http_exception_handler
+import traceback
+import uuid
+from datetime import datetime
+
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    request_id = str(uuid.uuid4())
+    
+    if isinstance(exc, HTTPException):
+        return await http_exception_handler(request, exc)
+    
+    # 记录详细错误日志
+    logger.error(f"Unhandled exception for request {request_id}: {traceback.format_exc()}")
+    
+    return JSONResponse(
+        status_code=500,
+        content=ErrorResponse(
+            error=ErrorDetail(
+                code="INTERNAL_SERVER_ERROR",
+                message="Internal server error occurred"
+            ),
+            request_id=request_id,
+            timestamp=datetime.utcnow().isoformat()
+        ).dict()
+    )
+
+def setup_exception_handlers(app: FastAPI):
+    app.exception_handler(Exception)(global_exception_handler)
+```
+
+## 文件上传处理
+
+### 异步文件上传端点
+```python
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from typing import List
+import aiofiles
+import os
+
+router = APIRouter()
+
+@router.post("/upload", response_model=SuccessResponse)
+async def upload_files(
+    files: List[UploadFile] = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    """异步上传文件接口"""
+    uploaded_files = []
+    
+    for file in files:
+        # 验证文件类型
+        if not any(file.filename.endswith(ext) for ext in settings.allowed_extensions):
+            raise HTTPException(
+                status_code=400,
+                detail=ErrorDetail(
+                    code="INVALID_FILE_TYPE",
+                    message=f"File type not supported: {file.filename}"
+                ).dict()
+            )
+        
+        # 验证文件大小
+        file_size = 0
+        content = await file.read()
+        file_size = len(content)
+        
+        if file_size > settings.max_file_size:
+            raise HTTPException(
+                status_code=400,
+                detail=ErrorDetail(
+                    code="FILE_TOO_LARGE",
+                    message=f"File size exceeds limit: {file_size} bytes"
+                ).dict()
+            )
+        
+        # 生成唯一文件名
+        file_id = str(uuid.uuid4())
+        file_extension = os.path.splitext(file.filename)[1]
+        stored_filename = f"{file_id}{file_extension}"
+        file_path = os.path.join(settings.upload_path, stored_filename)
+        
+        # 异步保存文件
+        os.makedirs(settings.upload_path, exist_ok=True)
+        async with aiofiles.open(file_path, 'wb') as f:
+            await f.write(content)
+        
+        uploaded_files.append({
+            "file_id": file_id,
+            "original_name": file.filename,
+            "stored_path": file_path,
+            "file_size": file_size
+        })
+        
+        # 启动后台解析任务
+        background_tasks.add_task(start_document_processing, file_id, file_path)
+    
+    return SuccessResponse(
+        data={"uploaded_files": uploaded_files},
+        message=f"Successfully uploaded {len(uploaded_files)} files",
+        timestamp=datetime.utcnow().isoformat()
+    )
+```
+
+## 文档处理服务
+
+### 异步文档解析
+```python
+from raganything import RAGAnything, RAGAnythingConfig
+
+class DocumentService:
+    def __init__(self):
+        self.rag_config = RAGAnythingConfig(
+            working_dir="./rag_storage",
+            mineru_parse_method="auto",
+            enable_image_processing=True,
+            enable_table_processing=True,
+            enable_equation_processing=True,
+            max_concurrent_files=4
+        )
+        self.rag_instance = None
+    
+    async def initialize_rag(self):
+        """初始化 RAG 实例"""
+        if self.rag_instance is None:
+            self.rag_instance = RAGAnything(
+                config=self.rag_config,
+                llm_model_func=self._get_llm_function(),
+                vision_model_func=self._get_vision_function(),
+                embedding_func=self._get_embedding_function()
+            )
+    
+    async def process_document_async(self, file_id: str, file_path: str) -> Dict[str, Any]:
+        """异步处理文档"""
+        await self.initialize_rag()
+        
+        try:
+            # 解析文档
+            content_list, md_content = self.rag_instance.parse_document(
+                file_path=file_path,
+                output_dir=f"./parsed_output/{file_id}",
+                parse_method="auto"
+            )
+            
+            # 完整处理文档
+            await self.rag_instance.process_document_complete(
+                file_path=file_path,
+                output_dir=f"./parsed_output/{file_id}",
+                doc_id=file_id
+            )
+            
+            return {
+                "file_id": file_id,
+                "status": "completed",
+                "content_blocks": len(content_list),
+                "markdown_length": len(md_content)
+            }
+            
+        except Exception as e:
+            logger.error(f"Document processing failed for {file_id}: {str(e)}")
+            raise
+
+document_service = DocumentService()
+
+async def start_document_processing(file_id: str, file_path: str):
+    """启动文档处理的后台任务"""
+    task_id = await task_manager.create_task(
+        document_service.process_document_async,
+        file_id,
+        file_path
+    )
+    return task_id
+```
+
+## 搜索服务接口
+
+### 多模态检索端点
+```python
+@router.post("/search", response_model=SuccessResponse)
+async def search_documents(
+    query: str,
+    search_type: str = "hybrid",  # vector, semantic, hybrid
+    limit: int = 10
+):
+    """多模态文档检索接口"""
+    try:
+        await document_service.initialize_rag()
+        
+        # 执行搜索
+        result = await document_service.rag_instance.query_with_multimodal(
+            query=query,
+            mode=search_type
+        )
+        
+        return SuccessResponse(
+            data={
+                "query": query,
+                "search_type": search_type,
+                "result": result,
+                "limit": limit
+            },
+            message="Search completed successfully",
+            timestamp=datetime.utcnow().isoformat()
+        )
+        
+    except Exception as e:
+        logger.error(f"Search failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=ErrorDetail(
+                code="SEARCH_FAILED",
+                message="Search operation failed"
+            ).dict()
+        )
+```
+
+## 健康检查和监控
+
+### 系统状态检查
+```python
+@router.get("/health", response_model=SuccessResponse)
+async def health_check():
+    """系统健康检查"""
+    status = {
+        "server": "healthy",
+        "qdrant": await check_qdrant_connection(),
+        "redis": await check_redis_connection(),
+        "minio": await check_minio_connection(),
+        "sglang": await check_sglang_connection(),
+        "embedding": await check_embedding_connection()
+    }
+    
+    overall_healthy = all(s == "healthy" for s in status.values())
+    
+    return SuccessResponse(
+        data=status,
+        message="healthy" if overall_healthy else "degraded",
+        timestamp=datetime.utcnow().isoformat()
+    )
+
+async def check_qdrant_connection() -> str:
+    """检查 Qdrant 连接状态"""
+    try:
+        # 实现 Qdrant 连接检查
+        return "healthy"
+    except:
+        return "unhealthy"
+```
+
+## 开发最佳实践
+
+### 1. 依赖注入
+- 使用 FastAPI 的依赖注入系统管理共享资源
+- 为数据库连接、外部服务客户端等使用依赖
+
+### 2. 错误处理
+- 定义详细的错误码和消息
+- 使用结构化的错误响应格式
+- 记录详细的错误日志用于调试
+
+### 3. 异步操作
+- 所有 I/O 操作使用异步模式
+- 长时间运行的任务使用后台任务
+- 实现任务状态查询机制
+
+### 4. 数据验证
+- 使用 Pydantic 模型进行请求/响应验证
+- 验证文件类型、大小等安全参数
+- 实现输入清理和净化
+
+### 5. 性能优化
+- 使用连接池管理数据库连接
+- 实现适当的缓存策略
+- 监控资源使用情况
+
+这些规则将确保 FastAPI 应用的高质量、可维护性和性能。

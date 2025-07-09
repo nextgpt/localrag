@@ -3,3 +3,193 @@ description:
 globs:
 alwaysApply: false
 ---
+# RAG-Anything Project Development Rules
+
+## 项目概述
+这是一个基于 raganything 构建的大模型 RAG 知识库项目，支持多模态文档处理、语义检索和向量检索，使用 FastAPI 提供异步 API 服务。
+
+## 开发环境配置
+
+### 服务器环境
+- **远程服务器**: ubuntu2204 192.168.30.54
+- **Python环境**: 已安装 raganything[all] 和 mineru[all]
+
+### 核心服务组件
+- **向量数据库**: Qdrant (192.168.30.54:6333)
+- **对象存储**: MinIO (192.168.30.54:19000, 账号: minioadmin/minioadmin)
+- **缓存数据库**: Redis (192.168.30.54, 密码: 8i9o0p-[)
+- **LLM服务**: SGLang (http://192.168.30.54:30000)
+- **嵌入服务**: Embedding API (http://192.168.30.54:8011/v1, 模型: Qwen3-Embedding-8B)
+
+## 项目结构
+
+### 核心代码目录
+- [raganything/](mdc:raganything/) - 核心 raganything 模块
+  - [raganything.py](mdc:raganything/raganything.py) - 主要 RAGAnything 类
+  - [mineru_parser.py](mdc:raganything/mineru_parser.py) - MinerU 文档解析器
+  - [modalprocessors.py](mdc:raganything/modalprocessors.py) - 多模态内容处理器
+  - [prompt.py](mdc:raganything/prompt.py) - 提示词模板
+
+### 数据存储目录
+- `parsed_output/` - 文档解析输出目录
+- `static/images/` - 图片存储目录
+- `technical_docs/` - 用户上传的原始文档
+- `qdrant_data/` - 向量数据库存储
+- `minio_data/` - MinIO 对象存储目录
+- `redis_data/` - Redis 数据目录
+
+### 示例代码
+- [examples/](mdc:examples/) - 使用示例
+  - [raganything_example.py](mdc:examples/raganything_example.py) - 主要使用示例
+
+## 开发规范
+
+### 编码原则
+1. **严谨高效**: 编写严谨和高效的代码，命名规范
+2. **提前研读**: 编码前总是提前阅读 API 文档或源码仓库
+3. **异步优先**: 基于 FastAPI 开发异步接口，参考 https://github.com/lpdswing/mineru-web
+4. **国际标准**: 接口包含详细的入参、出参、错误编码，符合国际标准
+
+### 核心技术栈
+
+#### 文档处理
+- **MinerU**: 文档解析，支持 PDF、图像、Office 文档
+- **RAGAnything**: 多模态 RAG 处理框架
+- **LightRAG**: 底层知识图谱和检索框架
+
+#### 多模态处理器
+- `ImageModalProcessor`: 图像内容处理
+- `TableModalProcessor`: 表格数据处理  
+- `EquationModalProcessor`: 数学公式处理
+- `GenericModalProcessor`: 通用内容处理
+
+#### API 开发
+- **FastAPI**: 主要 Web 框架
+- **异步处理**: 支持并发文档上传和解析
+- **错误处理**: 统一错误码和响应格式
+
+### 必需的 API 接口
+
+基于项目需求，需要开发以下接口：
+
+1. **异步上传文件接口**
+   - 支持多种文档格式
+   - 文件验证和错误处理
+   - 返回上传状态和文件ID
+
+2. **删除文件接口**
+   - 支持单个和批量删除
+   - 级联删除相关数据
+
+3. **异步解析文件接口**
+   - 调用 MinerU 解析文档
+   - 支持进度查询
+   - 异步状态管理
+
+4. **解析到向量数据库接口**
+   - 将解析结果存储到 Qdrant
+   - 支持多模态内容索引
+   - 错误恢复机制
+
+5. **向量数据库查询接口**
+   - 向量相似度检索
+   - 结果排序和过滤
+
+6. **语义检索接口**
+   - 基于知识图谱的语义搜索
+   - 多模态内容融合检索
+   - 上下文感知回答
+
+## 开发最佳实践
+
+### 异步处理模式
+参考 mineru-web 项目的异步处理方案：
+- 使用任务队列管理长时间运行的操作
+- 实现进度跟踪和状态查询
+- 错误处理和重试机制
+
+### 配置管理
+- 使用环境变量管理服务配置
+- 支持开发、测试、生产环境切换
+- 敏感信息加密存储
+
+### 数据流程
+1. **文档上传** → MinIO 存储
+2. **异步解析** → MinerU 处理
+3. **内容分离** → 文本/多模态内容
+4. **向量化** → Embedding 服务
+5. **存储索引** → Qdrant + Redis
+6. **知识图谱** → LightRAG 构建
+
+### 错误处理
+- 统一错误码定义
+- 详细错误信息记录
+- 用户友好的错误提示
+- 异步任务失败重试
+
+### 性能优化
+- 批量处理多个文件
+- 并发控制和资源管理
+- 缓存机制优化
+- 内存使用监控
+
+## 重要参考资源
+
+### 技术文档
+- RAG-Anything: https://github.com/HKUDS/RAG-Anything/blob/main/README_zh.md
+- LightRAG: https://github.com/HKUDS/LightRAG/blob/main/README-zh.md  
+- Mineru-Web异步方案: https://github.com/lpdswing/mineru-web
+
+### 关键配置示例
+
+#### RAGAnything 初始化
+```python
+from raganything import RAGAnything, RAGAnythingConfig
+
+config = RAGAnythingConfig(
+    working_dir="./rag_storage",
+    mineru_parse_method="auto",
+    enable_image_processing=True,
+    enable_table_processing=True,
+    enable_equation_processing=True,
+    max_concurrent_files=4
+)
+
+rag = RAGAnything(
+    config=config,
+    llm_model_func=llm_function,
+    vision_model_func=vision_function,
+    embedding_func=embedding_function
+)
+```
+
+#### MinerU 加速解析命令
+```bash
+mineru -p document.pdf -o parsed_output/ -b vlm-sglang-client -u http://192.168.30.54:30000
+```
+
+### 多模态处理示例
+```python
+# 完整文档处理
+await rag.process_document_complete(
+    file_path="path/to/document.pdf",
+    output_dir="./parsed_output",
+    parse_method="auto"
+)
+
+# 多模态查询
+result = await rag.query_with_multimodal(
+    query="描述文档中的图表和数据",
+    mode="hybrid"
+)
+```
+
+## 注意事项
+
+1. **异步处理**: 所有耗时操作必须使用异步模式
+2. **资源管理**: 合理控制并发数量，避免系统过载
+3. **错误恢复**: 实现健壮的错误处理和状态恢复
+4. **数据一致性**: 确保多个服务间的数据同步
+5. **安全性**: 验证用户输入，防止恶意文件上传
+
+这些规则将指导整个 RAG-Anything 项目的开发工作，确保代码质量和系统稳定性。
