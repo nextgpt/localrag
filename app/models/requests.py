@@ -37,7 +37,7 @@ class SearchRequest(BaseModel):
     search_type: SearchType = Field(SearchType.HYBRID, description="检索类型")
     limit: int = Field(10, ge=1, le=100, description="返回结果数量限制")
     offset: int = Field(0, ge=0, description="结果偏移量")
-    score_threshold: float = Field(0.7, ge=0.0, le=1.0, description="相似度阈值")
+    score_threshold: float = Field(0.5, ge=0.0, le=1.0, description="相似度阈值")
     file_ids: Optional[List[str]] = Field(None, description="限制检索的文件ID列表")
     
     @validator('query')

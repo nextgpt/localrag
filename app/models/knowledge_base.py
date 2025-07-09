@@ -19,12 +19,12 @@ class KnowledgeBaseStatus(str, Enum):
 class QdrantConfig(BaseModel):
     """Qdrant向量数据库配置"""
     collection_name: str = Field(..., description="集合名称")
-    vector_size: int = Field(3072, description="向量维度")
+    vector_size: int = Field(4096, description="向量维度")  # 🔧 更新为Qwen3-Embedding-8B真实维度
     distance_metric: str = Field("Cosine", description="距离度量：Cosine/Euclidean/Dot")
     
     # 检索参数配置
     top_k: int = Field(10, ge=1, le=100, description="返回结果数量")
-    score_threshold: float = Field(0.7, ge=0.0, le=1.0, description="相似度阈值")
+    score_threshold: float = Field(0.5, ge=0.0, le=1.0, description="相似度阈值")
     
     # HNSW配置（影响检索性能和准确率）
     hnsw_m: int = Field(16, ge=4, le=64, description="HNSW M参数，影响连接数")
@@ -39,10 +39,10 @@ class QdrantConfig(BaseModel):
         json_schema_extra = {
             "example": {
                 "collection_name": "knowledge_base_001",
-                "vector_size": 3072,
+                "vector_size": 4096,  # 🔧 更新为Qwen3-Embedding-8B真实维度
                 "distance_metric": "Cosine",
                 "top_k": 10,
-                "score_threshold": 0.75,
+                "score_threshold": 0.5,
                 "hnsw_m": 16,
                 "hnsw_ef_construct": 100,
                 "hnsw_ef_search": 100,
@@ -92,10 +92,10 @@ class KnowledgeBaseCreate(BaseModel):
     category: Optional[str] = Field(None, max_length=50, description="分类")
     
     # Qdrant配置（可选，使用默认值）
-    vector_size: int = Field(3072, description="向量维度")
+    vector_size: int = Field(4096, description="向量维度")  # 🔧 更新为Qwen3-Embedding-8B真实维度
     distance_metric: str = Field("Cosine", description="距离度量")
     top_k: int = Field(10, ge=1, le=100, description="默认返回结果数")
-    score_threshold: float = Field(0.7, ge=0.0, le=1.0, description="默认相似度阈值")
+    score_threshold: float = Field(0.5, ge=0.0, le=1.0, description="默认相似度阈值")
 
 
 class KnowledgeBaseUpdate(BaseModel):

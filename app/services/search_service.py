@@ -129,7 +129,7 @@ class SearchService:
         self,
         query: str,
         limit: int = 10,
-        score_threshold: float = 0.7,
+        score_threshold: float = 0.5,  # 🔧 降低阈值以获得更多相关结果
         file_ids: Optional[List[str]] = None,
         collection_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -451,7 +451,7 @@ class SearchService:
         query: str,
         search_type: str = "hybrid",
         limit: int = 10,
-        score_threshold: float = 0.7,
+        score_threshold: float = 0.5,
         file_ids: Optional[List[str]] = None,
         generate_answer: bool = True
     ) -> Dict[str, Any]:
@@ -638,7 +638,7 @@ class SearchService:
         query: str,
         search_type: str = "hybrid",
         limit: int = 10,
-        score_threshold: float = 0.7,
+        score_threshold: float = 0.5,  # 🔧 降低默认阈值
         file_ids: Optional[List[str]] = None,
         collection_name: Optional[str] = None,
         **kwargs
@@ -681,7 +681,7 @@ class SearchService:
         self,
         query: str,
         limit: int = 10,
-        score_threshold: float = 0.7,
+        score_threshold: float = 0.5,  # 🔧 降低默认阈值
         file_ids: Optional[List[str]] = None,
         collection_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -700,7 +700,7 @@ class SearchService:
         collection_name: str,
         query: str,
         top_k: int = 10,
-        score_threshold: float = 0.7,
+        score_threshold: float = 0.5,  # 🔧 降低默认阈值
         return_images: bool = True,
         return_metadata: bool = True,
         file_types: Optional[List[str]] = None,

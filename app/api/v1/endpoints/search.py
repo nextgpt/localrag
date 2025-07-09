@@ -50,7 +50,7 @@ async def search_documents(
             query=request.query,
             search_type=request.search_type,
             limit=extended_limit,
-            score_threshold=0.7,
+            score_threshold=0.5,  # 🔧 降低阈值以获得更多相关结果
             file_ids=request.file_ids
         )
         
@@ -307,7 +307,7 @@ async def generate_answer(
             query=request.query,
             search_type=request.search_type,
             limit=request.limit,
-            score_threshold=0.7,
+            score_threshold=0.5,  # 🔧 降低阈值以获得更多相关结果
             file_ids=request.file_ids
         )
         
