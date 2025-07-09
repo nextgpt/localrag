@@ -800,6 +800,7 @@ class DocumentService:
                 
                 data = response.json()
                 embedding = data["data"][0]["embedding"]
+                
                 logger.info(f"DocumentService获取embedding成功: {len(embedding)}维")
                 return embedding
                 

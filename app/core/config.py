@@ -47,9 +47,9 @@ class Settings(BaseSettings):
     
     # Embedding 服务配置
     EMBEDDING_BASE_URL: str = "http://192.168.30.54:8011/v1"
-    EMBEDDING_API_KEY: str = ""  # 如果需要认证
+    EMBEDDING_API_KEY: str = "dummy_key_for_local_service"  # 本地服务不需要认证，设置dummy值
     EMBEDDING_MODEL: str = "Qwen3-Embedding-8B"
-    EMBEDDING_DIMENSION: int = 3072  # Qwen3-Embedding-8B 的维度
+    EMBEDDING_DIMENSION: int = 4096  # ⭐ 推荐：使用Qwen3-Embedding-8B的原生维度
     
     # 兼容性别名（为了向后兼容）
     LLM_API_BASE: str = ""  # 会在初始化时同步
