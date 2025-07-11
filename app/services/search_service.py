@@ -129,7 +129,7 @@ class SearchService:
         self,
         query: str,
         limit: int = 10,
-        score_threshold: float = 0.5,  # 🔧 降低阈值以获得更多相关结果
+        score_threshold: float = 0.3,  # 🔧 进一步降低阈值以获得更多相关结果
         file_ids: Optional[List[str]] = None,
         collection_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -257,7 +257,7 @@ class SearchService:
         limit: int = 10,
         vector_weight: float = 0.7,
         text_weight: float = 0.3,
-        score_threshold: float = 0.5,
+        score_threshold: float = 0.3,  # 🔧 降低默认阈值提高召回率
         file_ids: Optional[List[str]] = None,
         collection_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -268,13 +268,18 @@ class SearchService:
             # 并行执行向量检索和文本检索
             import asyncio
             
+            # 确保collection_name正确传递
+            actual_collection = None
+            if collection_name and isinstance(collection_name, str):
+                actual_collection = collection_name
+                
             vector_task = asyncio.create_task(
                 self.vector_search(
                     query=query,
                     limit=limit * 2,  # 获取更多结果用于融合
                     score_threshold=score_threshold,
                     file_ids=file_ids,
-                    collection_name=collection_name
+                    collection_name=actual_collection
                 )
             )
             
@@ -283,7 +288,7 @@ class SearchService:
                     query=query,
                     limit=limit * 2,
                     file_ids=file_ids,
-                    collection_name=collection_name
+                    collection_name=actual_collection
                 )
             )
             
@@ -638,7 +643,7 @@ class SearchService:
         query: str,
         search_type: str = "hybrid",
         limit: int = 10,
-        score_threshold: float = 0.5,  # 🔧 降低默认阈值
+        score_threshold: float = 0.3,  # 🔧 降低默认阈值提高召回率
         file_ids: Optional[List[str]] = None,
         collection_name: Optional[str] = None,
         **kwargs
@@ -681,7 +686,7 @@ class SearchService:
         self,
         query: str,
         limit: int = 10,
-        score_threshold: float = 0.5,  # 🔧 降低默认阈值
+        score_threshold: float = 0.3,  # 🔧 降低默认阈值提高召回率
         file_ids: Optional[List[str]] = None,
         collection_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -700,7 +705,7 @@ class SearchService:
         collection_name: str,
         query: str,
         top_k: int = 10,
-        score_threshold: float = 0.5,  # 🔧 降低默认阈值
+        score_threshold: float = 0.3,  # 🔧 降低默认阈值提高召回率
         return_images: bool = True,
         return_metadata: bool = True,
         file_types: Optional[List[str]] = None,
@@ -927,12 +932,17 @@ class SearchService:
             # 2️⃣ 多层次检索策略
             all_results = []
             for enhanced_query in enhanced_queries:
+                # 确保collection_name正确传递
+                actual_collection = None
+                if collection_name and isinstance(collection_name, str):
+                    actual_collection = collection_name
+                
                 results = await self.vector_search(
                     query=enhanced_query["query"],
                     file_ids=file_ids,
                     limit=limit * 2,  # 增大搜索范围
                     score_threshold=score_threshold,
-                    collection_name=collection_name
+                    collection_name=actual_collection
                 )
                 
                 # 为结果添加查询类型标记

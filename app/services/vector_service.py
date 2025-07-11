@@ -210,6 +210,11 @@ class VectorService:
         """向量搜索"""
         if not self._connected:
             await self.initialize()
+        
+        # 🔧 验证collection_name参数
+        if not isinstance(collection_name, str):
+            logger.error(f"collection_name必须是字符串，当前类型: {type(collection_name)}, 值: {collection_name}")
+            raise ValueError(f"collection_name必须是字符串，当前类型: {type(collection_name)}")
             
         try:
             # 构建过滤条件
@@ -508,12 +513,15 @@ class VectorService:
         query_vector: List[float],
         file_ids: Optional[List[str]] = None,
         limit: int = 10,
-        score_threshold: float = 0.5,  # 🔧 降低默认阈值
+        score_threshold: float = 0.3,  # 🔧 降低默认阈值提高召回率
         collection_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """搜索文档"""
         if collection_name is None:
             collection_name = self.default_collection
+        
+        # 🔧 增强调试信息
+        logger.debug(f"search_documents调用参数: collection_name={collection_name}, file_ids={file_ids}, limit={limit}, score_threshold={score_threshold}")
         
         # 构建过滤条件
         filter_conditions = {}

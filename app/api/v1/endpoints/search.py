@@ -72,7 +72,7 @@ async def search_documents(
             query=request.query,
             search_type=request.search_type,
             limit=extended_limit,
-            score_threshold=0.5,  # 🔧 降低阈值以获得更多相关结果
+            score_threshold=0.3,  # 🔧 降低阈值以获得更多相关结果
             file_ids=request.file_ids
         )
         
@@ -404,7 +404,7 @@ async def get_search_stats(
             f"获取检索统计信息失败: {str(e)}"
         ) 
 
-@router.post("/search/tender", summary="🎯 招标书专用搜索分析")
+@router.post("/tender", summary="🎯 招标书专用搜索分析")
 async def search_tender_documents(
     request: TenderAnalysisRequest,
     search_service = Depends(get_search_service)
@@ -440,6 +440,15 @@ async def search_tender_documents(
                 detail=f"无效的分析类型。支持的类型: {', '.join(valid_analysis_types)}"
             )
         
+        # 🔧 验证和修复collection_name参数
+        actual_collection_name = None
+        if request.collection_name is not None:
+            if isinstance(request.collection_name, str):
+                actual_collection_name = request.collection_name
+            else:
+                logger.warning(f"招标书搜索API收到非字符串collection_name: {type(request.collection_name)}, 值: {request.collection_name}")
+                actual_collection_name = None
+        
         # 执行招标书专用搜索
         result = await search_service.search_tender_documents(
             query=request.query,
@@ -447,7 +456,7 @@ async def search_tender_documents(
             analysis_type=request.analysis_type,
             limit=request.limit,
             score_threshold=request.score_threshold,
-            collection_name=request.collection_name
+            collection_name=actual_collection_name
         )
         
         # 添加API响应元数据
@@ -478,7 +487,7 @@ async def search_tender_documents(
         logger.error(f"❌ 招标书搜索失败: {request.query} - {e}")
         raise HTTPException(status_code=500, detail=f"招标书搜索失败: {str(e)}")
 
-@router.post("/search/tender/batch", summary="🎯 批量招标书分析")
+@router.post("/tender/batch", summary="🎯 批量招标书分析")
 async def batch_tender_analysis(
     queries: List[str],
     file_ids: Optional[List[str]] = None,
