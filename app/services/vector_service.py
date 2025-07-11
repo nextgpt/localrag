@@ -513,7 +513,7 @@ class VectorService:
         query_vector: List[float],
         file_ids: Optional[List[str]] = None,
         limit: int = 10,
-        score_threshold: float = 0.3,  # 🔧 降低默认阈值提高召回率
+        score_threshold: float = 0.1,  # 🔧 大幅降低默认阈值确保能找到结果
         collection_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """搜索文档"""

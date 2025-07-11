@@ -13,7 +13,7 @@ from app.models.requests import SearchRequest, SearchType
 from app.core.exceptions import create_search_exception
 from app.services.search_service import get_search_service, SearchService
 
-router = APIRouter(prefix="/search", tags=["检索搜索"])
+router = APIRouter(tags=["检索搜索"])  # 🔧 移除重复的prefix
 logger = logging.getLogger("rag-anything")
 
 
@@ -23,7 +23,7 @@ class TenderAnalysisRequest(BaseModel):
     file_ids: Optional[List[str]] = None
     analysis_type: str = "general"  # general/project_info/technical_specs/commercial_terms/risks
     limit: int = 20
-    score_threshold: float = 0.4
+    score_threshold: float = 0.1  # 🔧 降低默认阈值提高召回率
     collection_name: Optional[str] = None
     
     class Config:
@@ -33,7 +33,7 @@ class TenderAnalysisRequest(BaseModel):
                 "file_ids": ["your-uploaded-file-id"],  # 使用实际上传的文件ID
                 "analysis_type": "project_info",
                 "limit": 20,
-                "score_threshold": 0.4
+                "score_threshold": 0.1
             }
         }
 
@@ -72,7 +72,7 @@ async def search_documents(
             query=request.query,
             search_type=request.search_type,
             limit=extended_limit,
-            score_threshold=0.3,  # 🔧 降低阈值以获得更多相关结果
+            score_threshold=0.1,  # 🔧 大幅降低阈值确保能找到结果
             file_ids=request.file_ids
         )
         
@@ -329,7 +329,7 @@ async def generate_answer(
             query=request.query,
             search_type=request.search_type,
             limit=request.limit,
-            score_threshold=0.5,  # 🔧 降低阈值以获得更多相关结果
+            score_threshold=0.1,  # 🔧 大幅降低阈值确保能找到结果
             file_ids=request.file_ids
         )
         
@@ -493,7 +493,7 @@ async def batch_tender_analysis(
     file_ids: Optional[List[str]] = None,
     analysis_type: str = "general",
     limit: int = 10,
-    score_threshold: float = 0.4,
+    score_threshold: float = 0.1,  # 🔧 降低默认阈值提高召回率
     collection_name: Optional[str] = None,
     search_service = Depends(get_search_service)
 ) -> Dict[str, Any]:
